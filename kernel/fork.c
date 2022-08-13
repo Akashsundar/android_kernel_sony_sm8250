@@ -96,7 +96,6 @@
 #include <linux/cpufreq_times.h>
 #include <linux/scs.h>
 #include <linux/simple_lmk.h>
-
 #ifdef CONFIG_MIHW
 #include <linux/cpuset.h>
 #endif

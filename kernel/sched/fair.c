@@ -6970,6 +6970,9 @@ static void find_best_target(struct sched_domain *sd, cpumask_t *cpus,
 	bool rtg_high_prio_task = task_rtg_high_prio(p);
 #ifdef CONFIG_MIHW
 	struct root_domain *rd;
+	bool prefer_idle;
+
+	prefer_idle = uclamp_latency_sensitive(p);
 
 	if (!prefer_idle)
 		prefer_idle = !!game_vip_task(p);
@@ -7044,6 +7047,26 @@ static void find_best_target(struct sched_domain *sd, cpumask_t *cpus,
 
 			if (fbt_env->skip_cpu == i)
 				continue;
+
+#ifdef CONFIG_MIHW
+			if (sched_boost_top_app() && rd->mid_cap_orig_cpu != -1 &&
+				((i < rd->mid_cap_orig_cpu && MAX_USER_RT_PRIO <= p->prio && p->prio < DEFAULT_PRIO) ||
+				(i >= rd->mid_cap_orig_cpu && p->prio > DEFAULT_PRIO)))
+				break;
+#endif
+			/*
+			 * p's blocked utilization is still accounted for on prev_cpu
+			 * so prev_cpu will receive a negative bias due to the double
+			 * accounting. However, the blocked utilization may be zero.
+			 */
+			wake_util = cpu_util_without(i, p);
+			new_util = wake_util + uclamp_task_util(p);
+			spare_wake_cap = capacity_orig - wake_util;
+
+			if (spare_wake_cap > most_spare_wake_cap) {
+				most_spare_wake_cap = spare_wake_cap;
+				most_spare_cap_cpu = i;
+			}
 
 #ifdef CONFIG_MIHW
 			if (sched_boost_top_app() && rd->mid_cap_orig_cpu != -1 &&
@@ -7347,13 +7370,13 @@ static void find_best_target(struct sched_domain *sd, cpumask_t *cpus,
 			if (best_idle_cpu != -1) {
 				if (game_vip_task(p))
 					break;
-			} else if (target_cpu != -1 || best_active_cpu != -1) {
+			} else if (target_cpu != -1) {
 				if (game_vip_task(p))
 					break;
 			}
 		} else {
 			if (game_vip_task(p) &&
-				(best_idle_cpu != -1 || target_cpu != -1 || best_active_cpu != -1))
+				(best_idle_cpu != -1 || target_cpu != -1))
 				break;
 		}
 #endif
@@ -7829,7 +7852,7 @@ int find_energy_efficient_cpu(struct task_struct *p, int prev_cpu,
 
 #ifdef CONFIG_MIHW
 	if (sched_boost_top_app() && is_top_app(p) && cpu_online(super_big_cpu) &&
-		!cpu_isolated(super_big_cpu) && cpumask_test_cpu(super_big_cpu, &p->cpus_allowed)) {
+		!cpu_isolated(super_big_cpu) && cpumask_test_cpu(super_big_cpu, &p->cpus_mask)) {
 		best_energy_cpu = super_big_cpu;
 		fbt_env.fastpath = SCHED_BIG_TOP;
 		goto done;

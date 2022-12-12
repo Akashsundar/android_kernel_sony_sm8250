@@ -7,3 +7,15 @@ config VOYAGER_ADDON
 
 
 source "drivers/voyager/sched/Kconfig"
+
+config CHARGE_THERMAL_SKIP
+	bool
+	default y
+	help
+	 Skip charge thermal
+
+config MI_THERMAL_SWITCH
+	bool
+	default y
+	help
+	 Say Y to control whether use Mi thermal interface

@@ -748,7 +748,11 @@ static void handle_jeita_fcc_scaling(struct step_chg_info *chip)
 	}
 }
 
+/* set JEITA_SUSPEND_HYST_UV to 70mV to avoid recharge frequently when jeita warm */
 #define JEITA_SUSPEND_HYST_UV		50000
+#define JEITA_HYSTERESIS_TEMP_THRED	150
+#define JEITA_SIX_PIN_BATT_HYST_UV	100000
+#define WARM_VFLOAT_UV                  4100000
 static int handle_jeita(struct step_chg_info *chip)
 {
 	union power_supply_propval pval = {0, };

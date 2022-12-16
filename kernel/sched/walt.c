@@ -3887,6 +3887,142 @@ walt_irq_work_migration(struct irq_work *irq_work)
  * Runs in hard-irq context. This should ideally run just after the latest
  * window roll-over.
  */
+void walt_irq_work(struct irq_work *irq_work)
+{
+	struct sched_cluster *cluster;
+	struct rq *rq;
+	int cpu;
+	u64 wc;
+	bool is_migration = false, is_asym_migration = false;
+	u64 total_grp_load = 0, min_cluster_grp_load = 0;
+	int level = 0;
+	unsigned long flags;
+
+	/* Am I the window rollover work or the migration work? */
+	if (irq_work == &walt_migration_irq_work)
+		is_migration = true;
+
+	for_each_cpu(cpu, cpu_possible_mask) {
+		if (level == 0)
+			raw_spin_lock(&cpu_rq(cpu)->lock);
+		else
+			raw_spin_lock_nested(&cpu_rq(cpu)->lock, level);
+		level++;
+	}
+
+	wc = sched_ktime_clock();
+	walt_load_reported_window = atomic64_read(&walt_irq_work_lastq_ws);
+	for_each_sched_cluster(cluster) {
+		u64 aggr_grp_load = 0;
+
+		raw_spin_lock(&cluster->load_lock);
+
+		for_each_cpu(cpu, &cluster->cpus) {
+			rq = cpu_rq(cpu);
+			if (rq->curr) {
+				update_task_ravg(rq->curr, rq,
+						TASK_UPDATE, wc, 0);
+				account_load_subtractions(rq);
+				aggr_grp_load += rq->grp_time.prev_runnable_sum;
+			}
+			if (is_migration && rq->notif_pending &&
+			    cpumask_test_cpu(cpu, &asym_cap_sibling_cpus)) {
+				is_asym_migration = true;
+				rq->notif_pending = false;
+			}
+		}
+
+		cluster->aggr_grp_load = aggr_grp_load;
+		total_grp_load += aggr_grp_load;
+
+		if (is_min_capacity_cluster(cluster))
+			min_cluster_grp_load = aggr_grp_load;
+		raw_spin_unlock(&cluster->load_lock);
+	}
+
+	if (total_grp_load) {
+		if (cpumask_weight(&asym_cap_sibling_cpus)) {
+			u64 big_grp_load =
+					  total_grp_load - min_cluster_grp_load;
+
+			for_each_cpu(cpu, &asym_cap_sibling_cpus)
+				cpu_cluster(cpu)->aggr_grp_load = big_grp_load;
+		}
+		rtgb_active = is_rtgb_active();
+	} else {
+		rtgb_active = false;
+	}
+
+	if (!is_migration && sysctl_sched_user_hint && time_after(jiffies,
+					sched_user_hint_reset_time))
+		sysctl_sched_user_hint = 0;
+
+	for_each_sched_cluster(cluster) {
+		cpumask_t cluster_online_cpus;
+		unsigned int num_cpus, i = 1;
+
+		cpumask_and(&cluster_online_cpus, &cluster->cpus,
+						cpu_online_mask);
+		num_cpus = cpumask_weight(&cluster_online_cpus);
+		for_each_cpu(cpu, &cluster_online_cpus) {
+			int flag = SCHED_CPUFREQ_WALT;
+
+			rq = cpu_rq(cpu);
+
+			if (is_migration) {
+				if (rq->notif_pending) {
+					flag |= SCHED_CPUFREQ_INTERCLUSTER_MIG;
+					rq->notif_pending = false;
+				}
+			}
+
+			if (is_asym_migration && cpumask_test_cpu(cpu,
+							&asym_cap_sibling_cpus))
+				flag |= SCHED_CPUFREQ_INTERCLUSTER_MIG;
+
+			if (i == num_cpus)
+				cpufreq_update_util(cpu_rq(cpu), flag);
+			else
+				cpufreq_update_util(cpu_rq(cpu), flag |
+							SCHED_CPUFREQ_CONTINUE);
+			i++;
+		}
+	}
+
+	/*
+	 * If the window change request is in pending, good place to
+	 * change sched_ravg_window since all rq locks are acquired.
+	 *
+	 * If the current window roll over is delayed such that the
+	 * mark_start (current wallclock with which roll over is done)
+	 * of the current task went past the window start with the
+	 * updated new window size, delay the update to the next
+	 * window roll over. Otherwise the CPU counters (prs and crs) are
+	 * not rolled over properly as mark_start > window_start.
+	 */
+	if (!is_migration) {
+		spin_lock_irqsave(&sched_ravg_window_lock, flags);
+
+		if ((sched_ravg_window != new_sched_ravg_window) &&
+		    (wc < this_rq()->window_start + new_sched_ravg_window)) {
+			sched_ravg_window_change_time = sched_ktime_clock();
+			printk_deferred("ALERT: changing window size from %u to %u at %lu\n",
+					sched_ravg_window,
+					new_sched_ravg_window,
+					sched_ravg_window_change_time);
+			sched_ravg_window = new_sched_ravg_window;
+			walt_tunables_fixup();
+		}
+		spin_unlock_irqrestore(&sched_ravg_window_lock, flags);
+	}
+
+	for_each_cpu(cpu, cpu_possible_mask)
+		raw_spin_unlock(&cpu_rq(cpu)->lock);
+
+	if (!is_migration)
+		core_ctl_check(this_rq()->window_start);
+}
+
 void walt_irq_work_roll_over(struct irq_work *irq_work)
 {
 	struct sched_cluster *cluster;

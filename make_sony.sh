@@ -10,11 +10,11 @@ autopack=1
 buildtype=clang
 timezone="Asia/Shanghai"
 build_device="pdx20x"
-kernel_name="Coleoptera-kernel-beta2-oss"
+kernel_name="Coleoptera-kernel-beta5-oss"
 defconfig_path="pdx20x_oss_defconfig"
 kbuild_build_user="pdx20x-oss"
 kbuild_build_host="Dedrimer"
-support="11, 12"
+support="11, 12, 13"
 #====================
 
 print (){
@@ -65,7 +65,7 @@ timedatectl set-timezone ${timezone}
 
 print "You are building version:${date}" yellow
 
-clang_path="${HOME}/cbl15/bin"
+clang_path="${HOME}/cbl17/bin"
 gcc_path="/usr/bin/aarch64-linux-gnu-"
 gcc_32_path="/usr/bin/arm-linux-gnueabi-"
 

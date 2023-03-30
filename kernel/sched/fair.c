@@ -6970,7 +6970,6 @@ static void find_best_target(struct sched_domain *sd, cpumask_t *cpus,
 	bool rtg_high_prio_task = task_rtg_high_prio(p);
 #ifdef CONFIG_MIHW
 	struct root_domain *rd;
-	bool prefer_idle;
 
 	prefer_idle = uclamp_latency_sensitive(p);
 
